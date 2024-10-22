@@ -26,7 +26,11 @@ const (
 	HomePageDomain = "www2.threefold.io"
 )
 
-var Issuers = []string{"TFT issuer", "TFTA issuer", "FreeTFT issuer"}
+var (
+	Issuers = []string{"TFT issuer", "TFTA issuer", "FreeTFT issuer"}
+	// Bridge addresses, Devnet and QA net
+	Bridges = []string{"GDHJP6TF3UXYXTNEZ2P36J5FH7W4BJJQ4AYYAXC66I2Q2AH5B6O6BCFG", "GAQH7XXFBRWXT2SBK6AHPOLXDCLXVFAKFSOJIRMRNCDINWKHGI6UYVKM"}
+)
 
 func main() {
 	input, err := os.ReadFile(InputFile)
@@ -88,6 +92,66 @@ func main() {
 			fmt.Println("failed to add trustline for key", key.Address(), err)
 		}
 	}
+
+	// This requires the bridges to have a trustline for TFT
+	fmt.Println("Funding brides")
+
+	if err := fundBridges(keys["TFT issuer"]); err != nil {
+		fmt.Println("Failed to fund bridges", err)
+	}
+}
+
+func fundBridges(pair keypair.KP) error {
+	address := pair.Address()
+
+	request := horizonclient.AccountRequest{AccountID: address}
+	account, err := horizonclient.DefaultTestNetClient.AccountDetail(request)
+	if err != nil {
+		return errors.Wrap(err, "could not load account")
+	}
+
+	ops := []txnbuild.Operation{}
+	for _, addr := range Bridges {
+		op := txnbuild.Payment{
+			Destination: addr,
+			// 1M TFT
+			Amount: "1000000",
+			Asset: txnbuild.CreditAsset{
+				Code:   "TFT",
+				Issuer: TftIssuer,
+			},
+		}
+
+		ops = append(ops, &op)
+	}
+
+	txparams := txnbuild.TransactionParams{
+		SourceAccount:        &txnbuild.SimpleAccount{AccountID: address, Sequence: account.Sequence},
+		IncrementSequenceNum: true,
+		Operations:           ops,
+		BaseFee:              BaseFee,
+		Memo:                 nil,
+		Preconditions: txnbuild.Preconditions{
+			TimeBounds: txnbuild.NewTimeout(60),
+		},
+	}
+
+	tx, err := txnbuild.NewTransaction(txparams)
+	if err != nil {
+		return errors.Wrap(err, "could not generate transaction")
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, pair.(*keypair.Full))
+	if err != nil {
+		return errors.Wrap(err, "could not sign transaction")
+	}
+
+	_, err = horizonclient.DefaultTestNetClient.SubmitTransaction(tx)
+	if err != nil {
+		return errors.Wrap(err, "could not submit add trust tx")
+	}
+
+	return nil
 }
 
 func addTrustlines(pair keypair.KP) error {
