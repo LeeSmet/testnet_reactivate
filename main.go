@@ -24,12 +24,15 @@ const (
 	InputFile = "testnet_secrets.csv"
 
 	HomePageDomain = "www2.threefold.io"
+
+	DevnetBridge = "GDHJP6TF3UXYXTNEZ2P36J5FH7W4BJJQ4AYYAXC66I2Q2AH5B6O6BCFG"
+	QaNetBridge  = "GAQH7XXFBRWXT2SBK6AHPOLXDCLXVFAKFSOJIRMRNCDINWKHGI6UYVKM"
 )
 
 var (
 	Issuers = []string{"TFT issuer", "TFTA issuer", "FreeTFT issuer"}
 	// Bridge addresses, Devnet and QA net
-	Bridges = []string{"GDHJP6TF3UXYXTNEZ2P36J5FH7W4BJJQ4AYYAXC66I2Q2AH5B6O6BCFG", "GAQH7XXFBRWXT2SBK6AHPOLXDCLXVFAKFSOJIRMRNCDINWKHGI6UYVKM"}
+	DevnetBridgeSigners = []string{"GDRVBYUUP5NGH5VDMKXP3SOIU4TRNHE2XI372UC24ZL2KLKHE2KQTY2E", "GCUCIV7SG4R2Z5M3A3U5EU3PLEJKQJI5M2HDYZUDLDXDVFBJ3REJL6VP"}
 )
 
 func main() {
@@ -99,6 +102,67 @@ func main() {
 	if err := fundBridges(keys["TFT issuer"]); err != nil {
 		fmt.Println("Failed to fund bridges", err)
 	}
+
+	fmt.Println("Setup devnet bridge signers")
+	if err := setupDevnetBridgeSigners(keys["DevnetBridge"], DevnetBridgeSigners); err != nil {
+		fmt.Println("Failed to fund bridges", err)
+	}
+}
+
+func setupDevnetBridgeSigners(pair keypair.KP, signers []string) error {
+	address := pair.Address()
+
+	request := horizonclient.AccountRequest{AccountID: address}
+	account, err := horizonclient.DefaultTestNetClient.AccountDetail(request)
+	if err != nil {
+		return errors.Wrap(err, "could not load account")
+	}
+
+	ops := []txnbuild.Operation{}
+	for _, address := range signers {
+		op := txnbuild.SetOptions{
+			Signer: &txnbuild.Signer{
+				Address: address,
+				Weight:  1,
+			},
+		}
+		ops = append(ops, &op)
+	}
+
+	// Now that we have multiple signers adjust the weight
+	ops = append(ops, &txnbuild.SetOptions{
+		LowThreshold:    txnbuild.NewThreshold(1),
+		MediumThreshold: txnbuild.NewThreshold(2),
+		HighThreshold:   txnbuild.NewThreshold(2),
+	})
+
+	txparams := txnbuild.TransactionParams{
+		SourceAccount:        &txnbuild.SimpleAccount{AccountID: address, Sequence: account.Sequence},
+		IncrementSequenceNum: true,
+		Operations:           ops,
+		BaseFee:              BaseFee,
+		Memo:                 nil,
+		Preconditions: txnbuild.Preconditions{
+			TimeBounds: txnbuild.NewTimeout(60),
+		},
+	}
+
+	tx, err := txnbuild.NewTransaction(txparams)
+	if err != nil {
+		return errors.Wrap(err, "could not generate transaction")
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, pair.(*keypair.Full))
+	if err != nil {
+		return errors.Wrap(err, "could not sign transaction")
+	}
+
+	_, err = horizonclient.DefaultTestNetClient.SubmitTransaction(tx)
+	if err != nil {
+		return errors.Wrap(err, "could not submit set domain tx")
+	}
+
+	return nil
 }
 
 func fundBridges(pair keypair.KP) error {
@@ -111,7 +175,7 @@ func fundBridges(pair keypair.KP) error {
 	}
 
 	ops := []txnbuild.Operation{}
-	for _, addr := range Bridges {
+	for _, addr := range []string{DevnetBridge, QaNetBridge} {
 		op := txnbuild.Payment{
 			Destination: addr,
 			// 1M TFT
