@@ -192,7 +192,7 @@ func fundBridges(pair keypair.KP) error {
 			},
 		},
 		BaseFee: BaseFee,
-		Memo:    txnbuild.MemoText(fmt.Sprintf("twin=%d", DevnetBridgeFundingTarget)),
+		Memo:    txnbuild.MemoText(fmt.Sprintf("twin_%d", DevnetBridgeFundingTarget)),
 		Preconditions: txnbuild.Preconditions{
 			TimeBounds: txnbuild.NewTimeout(60),
 		},
@@ -228,7 +228,7 @@ func fundBridges(pair keypair.KP) error {
 			},
 		},
 		BaseFee: BaseFee,
-		Memo:    txnbuild.MemoText(fmt.Sprintf("twin=%d", QanetBridgeFundingTarget)),
+		Memo:    txnbuild.MemoText(fmt.Sprintf("twin_%d", QanetBridgeFundingTarget)),
 		Preconditions: txnbuild.Preconditions{
 			TimeBounds: txnbuild.NewTimeout(60),
 		},
