@@ -26,7 +26,12 @@ const (
 	HomePageDomain = "www2.threefold.io"
 
 	DevnetBridge = "GDHJP6TF3UXYXTNEZ2P36J5FH7W4BJJQ4AYYAXC66I2Q2AH5B6O6BCFG"
-	QaNetBridge  = "GAQH7XXFBRWXT2SBK6AHPOLXDCLXVFAKFSOJIRMRNCDINWKHGI6UYVKM"
+	QanetBridge  = "GAQH7XXFBRWXT2SBK6AHPOLXDCLXVFAKFSOJIRMRNCDINWKHGI6UYVKM"
+
+	// The twin to fund on devnet so the bridge has TFTs
+	DevnetBridgeFundingTarget = 9142
+	// The twin to fund on qa net so the bridge has TFTs
+	QanetBridgeFundingTarget = 580
 )
 
 var (
@@ -96,15 +101,13 @@ func main() {
 		}
 	}
 
-	// This requires the bridges to have a trustline for TFT
-	fmt.Println("Funding brides")
-
-	if err := fundBridges(keys["TFT issuer"]); err != nil {
-		fmt.Println("Failed to fund bridges", err)
-	}
-
 	fmt.Println("Setup devnet bridge signers")
 	if err := setupDevnetBridgeSigners(keys["DevnetBridge"], DevnetBridgeSigners); err != nil {
+		fmt.Println("Failed to setup devnet bridge signers", err)
+	}
+
+	fmt.Println("Funding brides")
+	if err := fundBridges(keys["TFT issuer"]); err != nil {
 		fmt.Println("Failed to fund bridges", err)
 	}
 }
@@ -174,33 +177,64 @@ func fundBridges(pair keypair.KP) error {
 		return errors.Wrap(err, "could not load account")
 	}
 
-	ops := []txnbuild.Operation{}
-	for _, addr := range []string{DevnetBridge, QaNetBridge} {
-		op := txnbuild.Payment{
-			Destination: addr,
-			// 1M TFT
-			Amount: "1000000",
-			Asset: txnbuild.CreditAsset{
-				Code:   "TFT",
-				Issuer: TftIssuer,
-			},
-		}
-
-		ops = append(ops, &op)
-	}
-
 	txparams := txnbuild.TransactionParams{
 		SourceAccount:        &txnbuild.SimpleAccount{AccountID: address, Sequence: account.Sequence},
 		IncrementSequenceNum: true,
-		Operations:           ops,
-		BaseFee:              BaseFee,
-		Memo:                 nil,
+		Operations: []txnbuild.Operation{
+			&txnbuild.Payment{
+				Destination: DevnetBridge,
+				// 1B TFT
+				Amount: "1000000000",
+				Asset: txnbuild.CreditAsset{
+					Code:   "TFT",
+					Issuer: TftIssuer,
+				},
+			},
+		},
+		BaseFee: BaseFee,
+		Memo:    txnbuild.MemoText(fmt.Sprintf("twin=%d", DevnetBridgeFundingTarget)),
 		Preconditions: txnbuild.Preconditions{
 			TimeBounds: txnbuild.NewTimeout(60),
 		},
 	}
 
 	tx, err := txnbuild.NewTransaction(txparams)
+	if err != nil {
+		return errors.Wrap(err, "could not generate transaction")
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, pair.(*keypair.Full))
+	if err != nil {
+		return errors.Wrap(err, "could not sign transaction")
+	}
+
+	_, err = horizonclient.DefaultTestNetClient.SubmitTransaction(tx)
+	if err != nil {
+		return errors.Wrap(err, "could not submit add trust tx")
+	}
+
+	txparams = txnbuild.TransactionParams{
+		SourceAccount:        &txnbuild.SimpleAccount{AccountID: address, Sequence: account.Sequence + 1},
+		IncrementSequenceNum: true,
+		Operations: []txnbuild.Operation{
+			&txnbuild.Payment{
+				Destination: QanetBridge,
+				// 1B TFT
+				Amount: "1000000000",
+				Asset: txnbuild.CreditAsset{
+					Code:   "TFT",
+					Issuer: TftIssuer,
+				},
+			},
+		},
+		BaseFee: BaseFee,
+		Memo:    txnbuild.MemoText(fmt.Sprintf("twin=%d", QanetBridgeFundingTarget)),
+		Preconditions: txnbuild.Preconditions{
+			TimeBounds: txnbuild.NewTimeout(60),
+		},
+	}
+
+	tx, err = txnbuild.NewTransaction(txparams)
 	if err != nil {
 		return errors.Wrap(err, "could not generate transaction")
 	}
